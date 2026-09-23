@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+
+.env
+.env.*
+!.env.example
+
+# Python
+backend/venv/
+backend/__pycache__/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Firebase secrets
+serviceAccountKey.json
+backend/serviceAccountKey.json
+kavach-wildlife-alert-firebase-adminsdk-*.json
+backend/kavach-wildlife-alert-firebase-adminsdk-*.json
+
+# Generated/runtime files
+backend/uploads/
+backend/kavach.db
+
+# Large ML model files
+backend/yolo11n.pt
+backend/best.pt
+backend/risk_model.pkl
