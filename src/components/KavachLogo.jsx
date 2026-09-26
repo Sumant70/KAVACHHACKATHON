@@ -21,11 +21,14 @@ export default function KavachLogo({
         alignItems: "center",
         gap: isSmall ? 8 : 12,
         userSelect: "none",
+        /* Prevent any inherited CSS animations from moving the logo */
+        animation: "none",
+        transform: "none",
         ...style
       }}
       className="kavach-brand-container"
     >
-      {/* KAVACH Emblem Container */}
+      {/* KAVACH Emblem Container — must stay perfectly static */}
       <div
         style={{
           width: iconSize,
@@ -40,7 +43,11 @@ export default function KavachLogo({
           position: "relative",
           flexShrink: 0,
           overflow: "hidden",
-          padding: 2
+          padding: 2,
+          /* Explicit static positioning — no float, no drift */
+          animation: "none",
+          transform: "none",
+          transition: "none"
         }}
       >
         {!imageError ? (
@@ -53,7 +60,13 @@ export default function KavachLogo({
               height: "100%",
               objectFit: "contain",
               borderRadius: 6,
-              display: "block"
+              display: "block",
+              /* Lock image: no animation, no transform, perfectly centered */
+              animation: "none",
+              transform: "none",
+              transition: "none",
+              position: "relative",
+              margin: "auto"
             }}
           />
         ) : (
@@ -179,6 +192,20 @@ export default function KavachLogo({
 
       {/* Responsive Styles for Logo Component */}
       <style>{`
+        /* ── LOGO STABILITY FIX ──────────────────────────────── */
+        /* Ensure the KAVACH brand logo container and its icon   */
+        /* are always perfectly static. No float, jump, rotate,  */
+        /* or drift. Any accidental CSS animations are cancelled. */
+        .kavach-brand-container,
+        .kavach-brand-container > div,
+        .kavach-brand-container img,
+        .kavach-brand-container svg {
+          animation: none !important;
+          transform: none !important;
+          will-change: auto !important;
+        }
+        /* ── END LOGO STABILITY FIX ─────────────────────────── */
+
         @media (max-width: 1200px) {
           .kavach-full-title-desktop {
             font-size: 12px !important;
