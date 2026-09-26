@@ -13,7 +13,7 @@ import {
   isVibrationSupported,
   playSuccessChime
 } from "../components/AudioAlerts";
-import { requestFcmToken, attachForegroundListener } from "../firebase";
+import { requestFcmToken, attachForegroundListener, checkFcmSupport } from "../firebase";
 import { API_BASE_URL } from "../KavachApp";
 
 const PRESET_DEVICES = [
@@ -45,31 +45,51 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
     }
     return false;
   });
-  const [backendFcmStatus, setBackendFcmStatus] = useState("CHECKING"); // "CONFIGURED" | "FAILED" | "CHECKING"
+  const [backendFcmStatus, setBackendFcmStatus] = useState("CHECKING"); // "CONFIGURED" | "UNCONFIGURED" | "OFFLINE" | "CHECKING"
   const [fcmNotice, setFcmNotice] = useState(null);
+  const [fcmSupport, setFcmSupport] = useState({
+    checking: true,
+    supported: false,
+    reason: null,
+    isSecureContext: typeof window !== "undefined" ? Boolean(window.isSecureContext) : false
+  });
 
-  // Poll backend FCM status so UI never displays fake FCM ACTIVE
+  const cleanApiBase = (API_BASE_URL || "").replace(/\/+$/, "");
+
+  // Check client browser and origin support for Web Push / FCM
+  useEffect(() => {
+    checkFcmSupport().then(res => {
+      setFcmSupport({
+        checking: false,
+        supported: res.supported,
+        reason: res.reason,
+        isSecureContext: res.isSecureContext
+      });
+    });
+  }, []);
+
+  // Poll backend FCM status so UI accurately reflects backend readiness
   useEffect(() => {
     let unmounted = false;
     const checkFcmStatus = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/fcm/status`);
+        const res = await fetch(`${cleanApiBase}/api/fcm/status`);
         if (res.ok) {
           const data = await res.json();
           if (!unmounted) {
-            setBackendFcmStatus(data.configured && data.fcm_enabled ? "CONFIGURED" : "FAILED");
+            setBackendFcmStatus(data.configured && data.fcm_enabled ? "CONFIGURED" : (data.configured ? "CONFIGURED" : "UNCONFIGURED"));
           }
         } else {
-          if (!unmounted) setBackendFcmStatus("FAILED");
+          if (!unmounted) setBackendFcmStatus("OFFLINE");
         }
       } catch (err) {
-        if (!unmounted) setBackendFcmStatus("FAILED");
+        if (!unmounted) setBackendFcmStatus("OFFLINE");
       }
     };
     checkFcmStatus();
     const interval = setInterval(checkFcmStatus, 8000);
     return () => { unmounted = true; clearInterval(interval); };
-  }, []);
+  }, [cleanApiBase]);
 
   // Alerts & Overlay
   const [activeAlert, setActiveAlert] = useState(null);
@@ -94,12 +114,12 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
     }
   };
 
-  // Determine WebSocket Alert URL dynamically
+  // Determine WebSocket Alert URL dynamically without double slashes
   const getWsAlertsUrl = () => {
     if (typeof window !== "undefined" && window.location) {
-      const isHttps = window.location.protocol === "https:";
+      const isHttps = window.location.protocol === "https:" || cleanApiBase.startsWith("https:");
       const wsProto = isHttps ? "wss:" : "ws:";
-      const host = (API_BASE_URL || "").replace(/^https?:\/\//, "") || `${window.location.hostname}:8000`;
+      const host = cleanApiBase.replace(/^https?:\/\//, "") || `${window.location.hostname}:8000`;
       return `${wsProto}//${host}/ws/alerts`;
     }
     return "ws://127.0.0.1:8000/ws/alerts";
@@ -243,6 +263,18 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
 
   // Request FCM Push Notification Permission (Zero sound triggered)
   const handleEnablePushNotifications = async () => {
+    // 1. Verify browser environment & origin support first
+    const support = await checkFcmSupport();
+    if (!support.supported) {
+      if (!support.isSecureContext) {
+        setFcmNotice("⚠️ Insecure Origin: Web Push requires HTTPS or localhost. For PC testing open http://localhost:5173. For Android phone testing over LAN HTTP, enable chrome://flags/#unsafely-treat-insecure-origin-as-secure.");
+      } else {
+        setFcmNotice(`⚠️ Push not supported: ${support.reason}`);
+      }
+      setTimeout(() => setFcmNotice(null), 8000);
+      return;
+    }
+
     setFcmNotice("Requesting browser push notification permission...");
     try {
       const res = await requestFcmToken({
@@ -253,14 +285,14 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
       if (res.success) {
         setPushEnabled(true);
         setFcmNotice("✓ Background Push Notifications enabled successfully.");
-        setTimeout(() => setFcmNotice(null), 4000);
+        setTimeout(() => setFcmNotice(null), 5000);
       } else {
-        setFcmNotice(`Push permission not granted: ${res.error || res.permission}`);
-        setTimeout(() => setFcmNotice(null), 4000);
+        setFcmNotice(`Push registration failed: ${res.error || res.permission}`);
+        setTimeout(() => setFcmNotice(null), 6000);
       }
     } catch (e) {
-      setFcmNotice("Push notification initialization error.");
-      setTimeout(() => setFcmNotice(null), 4000);
+      setFcmNotice(`Push initialization error: ${e.message || e}`);
+      setTimeout(() => setFcmNotice(null), 5000);
     }
   };
 
@@ -269,23 +301,28 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
     try {
       setFcmNotice("Sending test push notification...");
       const token = localStorage.getItem("kavach_fcm_token");
-      const res = await fetch(`${API_BASE_URL}/api/fcm/test`, {
+      const res = await fetch(`${cleanApiBase}/api/fcm/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device_name: deviceName, token })
+        body: JSON.stringify({
+          device_name: deviceName,
+          token: token,
+          title: "🚨 TEST WILDLIFE PUSH",
+          body: `Test notification dispatched to ${deviceName}`
+        })
       });
       const data = await res.json();
       if (data.success && ((data.delivered_count ?? data.dispatched ?? 0) > 0 || data.total === 0)) {
         const delivered = data.delivered_count ?? data.dispatched ?? 0;
         setFcmNotice(`✓ Test push sent (${delivered} delivered).`);
       } else {
-        setFcmNotice(`Test push failed: ${data.message || data.error || data.status || "Delivery error"}`);
+        setFcmNotice(`Test push notice: ${data.message || data.error || data.status || "Delivery attempted"}`);
       }
-      setTimeout(() => setFcmNotice(null), 3500);
+      setTimeout(() => setFcmNotice(null), 4000);
     } catch (e) {
       console.error("Test push error:", e);
       setFcmNotice("Failed to send test push.");
-      setTimeout(() => setFcmNotice(null), 3500);
+      setTimeout(() => setFcmNotice(null), 4000);
     }
   };
 
@@ -332,7 +369,7 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
       }));
     } else {
       // Fallback via HTTP
-      fetch(`${API_BASE_URL}/api/alerts/test`, {
+      fetch(`${cleanApiBase}/api/alerts/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ device_name: deviceName })
@@ -610,38 +647,51 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
         {/* FCM Push Notification Status */}
         <div style={{
           background: "#0D1E15",
-          border: `1px solid ${backendFcmStatus === "FAILED"
-              ? "#802020"
-              : (backendFcmStatus === "CONFIGURED" && pushEnabled)
-                ? "#2F6B48"
-                : "#4A3018"
-            }`,
+          border: `1px solid ${
+            pushEnabled
+              ? "#2F6B48"
+              : backendFcmStatus === "OFFLINE"
+                ? "#602020"
+                : !fcmSupport.isSecureContext
+                  ? "#6B5820"
+                  : "#4A3018"
+          }`,
           borderRadius: 10,
           padding: 10
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
             <span style={{ fontSize: 10, color: "#8FA396" }}>FCM PUSH</span>
             <Bell size={14} color={
-              backendFcmStatus === "FAILED"
-                ? "#E54D4D"
-                : (backendFcmStatus === "CONFIGURED" && pushEnabled)
-                  ? "#4CAF50"
-                  : "#D6A84F"
+              pushEnabled
+                ? "#4CAF50"
+                : backendFcmStatus === "OFFLINE"
+                  ? "#E54D4D"
+                  : !fcmSupport.isSecureContext
+                    ? "#D6A84F"
+                    : "#8FA396"
             } />
           </div>
           <div style={{
             fontSize: 11, fontWeight: 700, color:
-              backendFcmStatus === "FAILED"
-                ? "#FF8080"
-                : (backendFcmStatus === "CONFIGURED" && pushEnabled)
-                  ? "#81C784"
-                  : "#D6A84F"
+              pushEnabled
+                ? "#81C784"
+                : backendFcmStatus === "OFFLINE"
+                  ? "#FF8080"
+                  : !fcmSupport.isSecureContext
+                    ? "#E6C665"
+                    : "#D6A84F"
           }}>
-            {backendFcmStatus === "FAILED"
-              ? "🔴 FCM FAILED"
-              : (backendFcmStatus === "CONFIGURED" && pushEnabled)
-                ? "🟢 ACTIVE"
-                : "🔴 PENDING PERMISSION"
+            {pushEnabled
+              ? "🟢 FCM ENABLED"
+              : backendFcmStatus === "OFFLINE"
+                ? "🔴 BACKEND OFFLINE"
+                : !fcmSupport.isSecureContext
+                  ? "🟡 INSECURE ORIGIN (LAN)"
+                  : fcmSupport.supported === false
+                    ? "🔴 NOT SUPPORTED"
+                    : (typeof Notification !== "undefined" && Notification.permission === "denied")
+                      ? "🔴 BLOCKED"
+                      : "🔴 PENDING PERMISSION"
             }
           </div>
         </div>
@@ -664,28 +714,43 @@ export default function MobileAlertDeviceView({ onNavigateBack }) {
 
       {/* Action Buttons */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {/* Browser Background Push Notification Button */}
+        {/* Browser Background Push Notification Button & Info */}
         {!pushEnabled ? (
-          <button
-            onClick={handleEnablePushNotifications}
-            style={{
-              background: "#163424",
-              border: "1px solid #2B5E40",
-              color: "#81C784",
-              padding: "12px 16px",
-              borderRadius: 10,
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8
-            }}
-          >
-            <Bell size={18} />
-            <span>🔔 ENABLE BACKGROUND PUSH NOTIFICATIONS</span>
-          </button>
+          <>
+            <button
+              onClick={handleEnablePushNotifications}
+              style={{
+                background: "#163424",
+                border: "1px solid #2B5E40",
+                color: "#81C784",
+                padding: "12px 16px",
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8
+              }}
+            >
+              <Bell size={18} />
+              <span>🔔 ENABLE BACKGROUND PUSH NOTIFICATIONS</span>
+            </button>
+            {!fcmSupport.isSecureContext && (
+              <div style={{
+                background: "rgba(214, 168, 79, 0.08)",
+                border: "1px dashed rgba(214, 168, 79, 0.4)",
+                borderRadius: 8,
+                padding: "8px 12px",
+                fontSize: 11,
+                color: "#D6A84F",
+                lineHeight: "1.4"
+              }}>
+                ℹ️ <strong>LAN Testing Notice:</strong> Browsers require a Secure Origin (HTTPS or localhost) for Web Push & Service Workers. For PC testing use <code>localhost:5173</code>. For Android phone testing over LAN HTTP, enable <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> and add this address.
+              </div>
+            )}
+          </>
         ) : (
           <div style={{
             background: "rgba(46, 107, 72, 0.2)",

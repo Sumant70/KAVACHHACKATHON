@@ -4,23 +4,37 @@ import {
   Layers, Radio, Bell, Eye, Compass, Cpu, Database
 } from "lucide-react";
 import KavachLogo from "../components/KavachLogo";
+import HeroWildlifeRadar from "../components/HeroWildlifeRadar";
 
 export default function LandingPageView({ onEnterCommandCenter, onStartDetection }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 60, paddingBottom: 60 }}>
       {/* Hero Section */}
       <div
+        className="kavach-hero-banner"
         style={{
           position: "relative",
           borderRadius: 12,
-          padding: "64px 32px",
-          background: "radial-gradient(circle at top right, rgba(46, 107, 72, 0.35) 0%, rgba(13, 26, 19, 0.95) 45%, #08110D 100%)",
+          padding: "54px 36px",
+          background: "radial-gradient(circle at 80% 20%, rgba(46, 107, 72, 0.4) 0%, rgba(13, 26, 19, 0.96) 50%, #08110D 100%)",
           border: "1.5px solid #28543C",
           overflow: "hidden",
           boxShadow: "0 12px 40px rgba(0,0,0,0.6)"
         }}
       >
-        <div style={{ maxWidth: 780, display: "flex", flexDirection: "column", gap: 18 }}>
+        <div
+          className="kavach-hero-flex"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 40,
+            position: "relative",
+            zIndex: 2
+          }}
+        >
+          {/* Left Text & Actions Column (~60-65% width) */}
+          <div style={{ flex: "1 1 520px", maxWidth: 680, display: "flex", flexDirection: "column", gap: 18 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(214, 168, 79, 0.15)", border: "1px solid rgba(214, 168, 79, 0.4)", padding: "4px 12px", borderRadius: 4, width: "fit-content" }}>
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#D6A84F", animation: "pulse 1.5s infinite" }} />
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 700, color: "#FFD580", letterSpacing: "0.08em" }}>
@@ -84,10 +98,62 @@ export default function LandingPageView({ onEnterCommandCenter, onStartDetection
           </div>
         </div>
 
-        {/* Tactical HUD Corner Marks */}
-        <div style={{ position: "absolute", top: 12, right: 12, borderTop: "2px solid #D6A84F", borderRight: "2px solid #D6A84F", width: 18, height: 18 }} />
-        <div style={{ position: "absolute", bottom: 12, left: 12, borderBottom: "2px solid #2E6B48", borderLeft: "2px solid #2E6B48", width: 18, height: 18 }} />
+        {/* Right Visual / Radar Emblem Column (~35-40% width) */}
+        <div
+          className="kavach-hero-visual-col"
+          style={{
+            flex: "0 0 420px",
+            maxWidth: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}
+        >
+          <HeroWildlifeRadar />
+        </div>
       </div>
+
+      {/* Tactical HUD Corner Marks */}
+      <div style={{ position: "absolute", top: 12, right: 12, borderTop: "2px solid #D6A84F", borderRight: "2px solid #D6A84F", width: 18, height: 18, pointerEvents: "none" }} />
+      <div style={{ position: "absolute", bottom: 12, left: 12, borderBottom: "2px solid #2E6B48", borderLeft: "2px solid #2E6B48", width: 18, height: 18, pointerEvents: "none" }} />
+
+      {/* Responsive Layout Styles for Hero Section */}
+      <style>{`
+        @media (max-width: 1100px) {
+          .kavach-hero-flex {
+            gap: 24px !important;
+          }
+          .kavach-hero-visual-col {
+            flex: 0 0 350px !important;
+            width: 350px !important;
+          }
+        }
+        @media (max-width: 900px) {
+          .kavach-hero-flex {
+            flex-direction: column !important;
+            align-items: center !important;
+            gap: 32px !important;
+          }
+          .kavach-hero-banner {
+            padding: 40px 24px !important;
+          }
+          .kavach-hero-visual-col {
+            flex: 0 0 300px !important;
+            width: 300px !important;
+            margin-top: 8px;
+          }
+        }
+        @media (max-width: 600px) {
+          .kavach-hero-banner {
+            padding: 32px 18px !important;
+          }
+          .kavach-hero-visual-col {
+            flex: 0 0 260px !important;
+            width: 260px !important;
+          }
+        }
+      `}</style>
+    </div>
 
       {/* How KAVACH Works (5 Pillars) */}
       <div>

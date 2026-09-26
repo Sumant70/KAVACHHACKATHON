@@ -21,20 +21,117 @@ export const app = initializeApp(firebaseConfig);
 
 let messagingInstance = null;
 
-export async function getFirebaseMessaging() {
-  if (typeof window === "undefined") return null;
+/**
+ * Validates whether the current browser and network origin can support Firebase Web Push.
+ * Accurately diagnoses secure context, Notification, ServiceWorker, and PushManager availability.
+ */
+export async function checkFcmSupport() {
+  if (typeof window === "undefined") {
+    return {
+      supported: false,
+      reason: "Window context unavailable (SSR).",
+      isSecureContext: false
+    };
+  }
+
+  const isSecure = Boolean(window.isSecureContext);
+  const hasNotification = "Notification" in window;
+  const hasServiceWorker = "serviceWorker" in navigator;
+  const hasPushManager = "PushManager" in window;
+
+  if (!isSecure) {
+    return {
+      supported: false,
+      reason: "Insecure Origin: Web Push & Service Workers require HTTPS or localhost. Over LAN HTTP (e.g. 172.16.x.x), test via localhost, HTTPS, or Android Chrome flag chrome://flags/#unsafely-treat-insecure-origin-as-secure.",
+      isSecureContext: false,
+      hasNotification,
+      hasServiceWorker,
+      hasPushManager
+    };
+  }
+
+  if (!hasNotification) {
+    return {
+      supported: false,
+      reason: "Notification API is not supported in this browser.",
+      isSecureContext: isSecure,
+      hasNotification,
+      hasServiceWorker,
+      hasPushManager
+    };
+  }
+
+  if (!hasServiceWorker) {
+    return {
+      supported: false,
+      reason: "Service Workers are not supported or disabled in this browser.",
+      isSecureContext: isSecure,
+      hasNotification,
+      hasServiceWorker,
+      hasPushManager
+    };
+  }
+
+  if (!hasPushManager) {
+    return {
+      supported: false,
+      reason: "Push messaging (PushManager) is not supported in this browser.",
+      isSecureContext: isSecure,
+      hasNotification,
+      hasServiceWorker,
+      hasPushManager
+    };
+  }
+
   try {
     const supported = await isSupported();
     if (!supported) {
-      console.warn("[FCM] Firebase Messaging is not supported in this browser.");
-      return null;
+      return {
+        supported: false,
+        reason: "Firebase Messaging is not supported in this browser environment.",
+        isSecureContext: isSecure,
+        hasNotification,
+        hasServiceWorker,
+        hasPushManager
+      };
     }
+    return {
+      supported: true,
+      reason: null,
+      isSecureContext: isSecure,
+      hasNotification,
+      hasServiceWorker,
+      hasPushManager
+    };
+  } catch (err) {
+    return {
+      supported: false,
+      reason: `Firebase isSupported check failed: ${err.message || err}`,
+      isSecureContext: isSecure,
+      hasNotification,
+      hasServiceWorker,
+      hasPushManager
+    };
+  }
+}
+
+/**
+ * Obtains the Firebase Messaging instance if supported.
+ */
+export async function getFirebaseMessaging() {
+  if (typeof window === "undefined") return null;
+  const check = await checkFcmSupport();
+  if (!check.supported) {
+    console.warn(`[FCM] ${check.reason}`);
+    return null;
+  }
+  try {
     if (!messagingInstance) {
       messagingInstance = getMessaging(app);
     }
     return messagingInstance;
   } catch (err) {
-    console.warn("[FCM] isSupported check failed:", err);
+    console.warn("[FCM] getMessaging initialization failed:", err);
     return null;
   }
 }
@@ -44,8 +141,13 @@ export async function getFirebaseMessaging() {
  * Obtains the FCM registration token and registers it with the backend database.
  */
 export async function requestFcmToken(deviceInfo = {}) {
-  if (typeof window === "undefined" || !("Notification" in window)) {
-    return { success: false, error: "Notifications not supported by this browser." };
+  const support = await checkFcmSupport();
+  if (!support.supported) {
+    return {
+      success: false,
+      error: support.reason,
+      isSecureContext: support.isSecureContext
+    };
   }
 
   try {
@@ -53,20 +155,27 @@ export async function requestFcmToken(deviceInfo = {}) {
     const permission = await Notification.requestPermission();
     if (permission !== "granted") {
       console.log("[FCM] Notification permission state:", permission);
-      return { success: false, permission, error: `Permission ${permission}` };
+      return { success: false, permission, error: `Notification permission: ${permission}` };
     }
 
-    // 2. Register Service Worker
+    // 2. Register Service Worker with root scope
     let swReg = null;
     if ("serviceWorker" in navigator) {
-      swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
-      await navigator.serviceWorker.ready;
+      try {
+        swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
+        await navigator.serviceWorker.ready;
+      } catch (swErr) {
+        console.error("[FCM] Service Worker registration failed:", swErr);
+        return { success: false, error: `Service Worker registration failed: ${swErr.message || swErr}` };
+      }
+    } else {
+      return { success: false, error: "Service Worker unavailable." };
     }
 
     // 3. Obtain Firebase Messaging Instance
     const messaging = await getFirebaseMessaging();
     if (!messaging) {
-      return { success: false, error: "FCM Messaging not supported in current environment." };
+      return { success: false, error: "FCM Messaging not initialized in current environment." };
     }
 
     // 4. Generate FCM Device Token
@@ -76,10 +185,10 @@ export async function requestFcmToken(deviceInfo = {}) {
     });
 
     if (!token) {
-      return { success: false, error: "FCM returned empty token." };
+      return { success: false, error: "FCM returned an empty token." };
     }
 
-    console.log("[FCM] Token generated:", token);
+    console.log("[FCM] Token generated successfully:", token.substring(0, 15) + "...");
 
     // Cache locally
     try {
@@ -87,9 +196,14 @@ export async function requestFcmToken(deviceInfo = {}) {
     } catch {}
 
     // 5. Register with backend database
-    await sendTokenToBackend(token, deviceInfo);
+    const registered = await sendTokenToBackend(token, deviceInfo);
 
-    return { success: true, token, permission };
+    return {
+      success: true,
+      token,
+      permission,
+      backendRegistered: registered
+    };
   } catch (err) {
     console.error("[FCM] Error acquiring FCM token:", err);
     return { success: false, error: err.message || String(err) };
@@ -101,6 +215,7 @@ export async function requestFcmToken(deviceInfo = {}) {
  */
 export async function sendTokenToBackend(token, deviceInfo = {}) {
   try {
+    const cleanBase = (API_BASE_URL || "").replace(/\/+$/, "");
     const payload = {
       token: token.trim(),
       device_id: deviceInfo.deviceId || localStorage.getItem("kavach_device_id") || "DEV-" + Math.random().toString(36).substring(2, 8).toUpperCase(),
@@ -110,14 +225,15 @@ export async function sendTokenToBackend(token, deviceInfo = {}) {
       user_agent: navigator.userAgent
     };
 
-    const res = await fetch(`${API_BASE_URL}/api/fcm/register`, {
+    const res = await fetch(`${cleanBase}/api/fcm/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
 
     if (res.ok) {
-      console.log("[FCM] Token registered with backend database for:", payload.device_name);
+      const data = await res.json();
+      console.log("[FCM] Token registered with backend database for:", payload.device_name, data);
       return true;
     } else {
       console.warn("[FCM] Backend registration returned status:", res.status);

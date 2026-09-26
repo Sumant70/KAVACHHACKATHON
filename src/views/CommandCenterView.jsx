@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { startContinuousSiren, stopContinuousSiren } from "../components/AudioAlerts";
 import { API_BASE_URL } from "../KavachApp";
+import KavachLiveSurveillance from "../components/KavachLiveSurveillance";
 
 export default function CommandCenterView({
   detections = [],
@@ -256,6 +257,17 @@ export default function CommandCenterView({
         </div>
       </div>
 
+      {/* ================================================== */}
+      {/* KAVACH LIVE SURVEILLANCE — 4-CAMERA CONTROL ROOM   */}
+      {/* ================================================== */}
+      <section style={{ width: "100%", margin: "8px 0" }}>
+        <KavachLiveSurveillance
+          apiBaseUrl={API_BASE_URL}
+          onNavigate={onNavigate}
+          isEmbedded={false}
+        />
+      </section>
+
       {/* SECTION 36: FINAL JUDGE DEMO SCREEN — COMMUNITY WILDLIFE ALERT NETWORK */}
       <div className="kv-panel" style={{
         padding: "20px 24px",
@@ -388,7 +400,8 @@ export default function CommandCenterView({
                         {recentCommunityAlert.animal?.toLowerCase().includes("elephant") ? "🐘" :
                          recentCommunityAlert.animal?.toLowerCase().includes("tiger") ? "🐅" :
                          recentCommunityAlert.animal?.toLowerCase().includes("leopard") ? "🐆" :
-                         recentCommunityAlert.animal?.toLowerCase().includes("boar") ? "🐗" : "🦌"}
+                         recentCommunityAlert.animal?.toLowerCase().includes("boar") ? "🐗" :
+                         recentCommunityAlert.animal?.toLowerCase().includes("dog") ? "🐕" : "🦌"}
                       </span>
                       <div>
                         <div style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 20, fontWeight: 800, color: "#FFFFFF" }}>
@@ -633,6 +646,23 @@ export default function CommandCenterView({
             }}
           >
             🐗 SIMULATE WILD BOAR
+          </button>
+
+          <button
+            id="simulate-dog-btn"
+            onClick={() => handleSimulate("Dog")}
+            style={{
+              background: "#1E3D2A",
+              border: "1px solid #4CAF50",
+              color: "#81C784",
+              padding: "7px 12px",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 700
+            }}
+          >
+            🐕 SIMULATE DOG
           </button>
 
           <button

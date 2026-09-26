@@ -21,6 +21,7 @@ export const ALLOWED_WILDLIFE = [
   "tiger",
   "leopard",
   "wild_boar",
+  "dog",
   "spotted_deer",
   "sloth_bear",
   "gaur",
@@ -39,6 +40,7 @@ export const ALLOWED_SPECIES_CANONICAL = [
   "Tiger",
   "Leopard",
   "Wild Boar",
+  "Dog",
   "Spotted Deer",
   "Sloth Bear",
   "Gaur / Indian Bison",
@@ -57,6 +59,7 @@ export const WILDLIFE_EMOJIS = {
   tiger: "🐅",
   leopard: "🐆",
   wild_boar: "🐗",
+  dog: "🐕",
   spotted_deer: "🦌",
   sloth_bear: "🐻",
   gaur: "🦬",
@@ -84,6 +87,7 @@ export function isAllowedWildlife(speciesName) {
   if (norm.includes("tiger") && !norm.includes("lion")) return true;
   if (norm.includes("leopard")) return true;
   if (norm.includes("boar") || norm.includes("wildboar")) return true;
+  if (norm.includes("dog") || norm.includes("canine") || norm.includes("hound")) return true;
   if (norm.includes("spotteddeer") || norm.includes("chital")) return true;
   if (norm.includes("slothbear")) return true;
   if (norm.includes("gaur") || norm.includes("bison")) return true;

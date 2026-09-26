@@ -159,8 +159,10 @@ class FCMService:
             },
             "recent_devices": summary["recent_devices"],
             "error": cls._init_error if not is_conf else None,
-            "notice": None if is_conf else (cls._init_error or "Service Account key pending in environment (FIREBASE_CREDENTIALS_PATH).")
+            "notice": None if is_conf else (cls._init_error or "Service Account key pending in environment (FIREBASE_CREDENTIALS_PATH)."),
+            "origin_requirement": "Secure Context (HTTPS or localhost) required for browser WebPush/FCM"
         }
+
 
     @classmethod
     def send_wildlife_alert(
@@ -325,7 +327,17 @@ class FCMService:
             }
 
     @classmethod
-    def send_test_push(cls, device_name: str = "Command Center", target_token: Optional[str] = None) -> Dict[str, Any]:
+    def send_test_push(
+        cls,
+        device_name: str = "Command Center",
+        target_token: Optional[str] = None,
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+        animal: Optional[str] = None,
+        risk_level: Optional[str] = None,
+        confidence: Optional[float] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
         """Sends an isolated test notification without generating a fake wildlife detection."""
         cls.initialize()
 
@@ -359,19 +371,23 @@ class FCMService:
                 "message": "No registered device tokens available for test push."
             }
 
-        title = "🧪 KAVACH TEST PUSH NOTIFICATION"
-        body = f"System verification broadcast from {device_name}. Early Warning Push channels operational."
+        push_title = title or "🧪 KAVACH TEST PUSH NOTIFICATION"
+        push_body = body or f"System verification broadcast from {device_name}. Early Warning Push channels operational."
 
-        notification_payload = messaging.Notification(title=title, body=body)
+        notification_payload = messaging.Notification(title=push_title, body=push_body)
         data_payload = {
             "type": "TEST_ALERT",
             "is_test": "true",
             "event_id": f"TEST-PUSH-{datetime.now().strftime('%H%M%S')}",
             "source": device_name,
+            "animal": animal or "SYSTEM TEST",
+            "risk_level": risk_level or "LOW",
+            "confidence": str(confidence or 99.0),
             "timestamp": datetime.now().isoformat(),
             "click_action": "/alert-device",
             "url": "/alert-device"
         }
+
 
         webpush_config = messaging.WebpushConfig(
             headers={"Urgency": "high"},

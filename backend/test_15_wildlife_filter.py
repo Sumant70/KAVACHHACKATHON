@@ -64,7 +64,61 @@ def run_test_image(test_name: str, file_path: Path, expected_detected: bool, exp
         return True
 
 
+def run_unit_whitelist_tests():
+    print(f"\n=======================================================")
+    print("RUNNING UNIT WHITELIST & SPECIES INTEGRITY CHECKS")
+    print(f"=======================================================")
+    from allowed_wildlife import (
+        ALLOWED_WILDLIFE,
+        ALLOWED_WILDLIFE_SET,
+        WILDLIFE_METADATA,
+        match_allowed_wildlife,
+        is_allowed_wildlife,
+        get_wildlife_canonical_name,
+        evaluate_model_capabilities
+    )
+    
+    # 1. Exactly 15 species
+    assert len(ALLOWED_WILDLIFE) == 15, f"Expected 15 species, got {len(ALLOWED_WILDLIFE)}"
+    print(f"[PASS] ALLOWED_WILDLIFE contains exactly {len(ALLOWED_WILDLIFE)} species.")
+
+    # 2. Dog is excluded
+    assert "dog" not in ALLOWED_WILDLIFE_SET, "Dog must NOT be in ALLOWED_WILDLIFE"
+    assert not is_allowed_wildlife("dog"), "Dog must not be allowed"
+    assert match_allowed_wildlife("dog") is None, "match_allowed_wildlife('dog') must be None"
+    print("[PASS] Dog is strictly excluded from wildlife classes.")
+
+    # 3. Non-wildlife rejected
+    for term in ["person", "human", "car", "vehicle", "cow", "cat", "horse", "lion"]:
+        assert not is_allowed_wildlife(term), f"{term} must not be allowed"
+        assert match_allowed_wildlife(term) is None, f"{term} mapping must be None"
+    print("[PASS] Humans, vehicles, domestic livestock, and non-target wildlife are strictly rejected.")
+
+    # 4. Generic snake is preserved and NOT converted
+    assert match_allowed_wildlife("snake") == "snake", "Generic snake must map to snake"
+    assert get_wildlife_canonical_name("snake") == "Snake", "Generic snake must be named 'Snake'"
+    assert match_allowed_wildlife("cobra") == "cobra", "Cobra must map to cobra"
+    assert match_allowed_wildlife("krait") == "krait", "Krait must map to krait"
+    assert match_allowed_wildlife("indian_python") == "indian_python", "Python must map to indian_python"
+    assert match_allowed_wildlife("russells_viper") == "russells_viper", "Viper must map to russells_viper"
+    print("[PASS] Generic snake is preserved as 'Snake' and NEVER converted to specific venomous species.")
+
+    # 5. Evaluate best.pt capabilities
+    from ultralytics import YOLO
+    model = YOLO(str(BASE_DIR / "best.pt"))
+    caps = evaluate_model_capabilities({int(k): str(v) for k, v in model.names.items()})
+    print(f"[PASS] best.pt native classes: {model.names}")
+    print(f"[PASS] Genuinely supported by best.pt: {[s['canonical'] for s in caps['supported_species']]}")
+    print(f"[PASS] Unsupported by best.pt: {len(caps['unsupported_species'])} classes")
+
+    return True
+
+
 def run_all_tests():
+    unit_ok = run_unit_whitelist_tests()
+    if not unit_ok:
+        return False
+
     uploads_dir = BASE_DIR / "uploads"
     samples_dir = BASE_DIR / "sample_images"
 

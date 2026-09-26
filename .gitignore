@@ -1,30 +1,33 @@
 node_modules/
-dist/
-build/
-
 .env
 .env.*
 !.env.example
 
-# Python
-backend/venv/
-backend/__pycache__/
 __pycache__/
 *.pyc
-.venv/
-venv/
 
 # Firebase secrets
-serviceAccountKey.json
-backend/serviceAccountKey.json
-kavach-wildlife-alert-firebase-adminsdk-*.json
-backend/kavach-wildlife-alert-firebase-adminsdk-*.json
+**/serviceAccountKey.json
+**/*firebase-adminsdk*.json
+**/*firebase*.json
 
-# Generated/runtime files
+# Local database
+**/*.db
+
+# ML model files
+**/*.pt
+**/*.pkl
+
+# Training datasets / generated data
+backend/kavach_dataset/
+backend/kavach_cleaned_dataset/
+backend/kavach_5class_dataset/
+backend/kavach_5class_balanced/
+backend/models/
 backend/uploads/
-backend/kavach.db
+scratch/
 
-# Large ML model files
-backend/yolo11n.pt
-backend/best.pt
-backend/risk_model.pkl
+# Python generated files
+*.json
+
+dist/

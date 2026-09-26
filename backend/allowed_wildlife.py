@@ -33,11 +33,12 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 # ==============================================================================
 # 1. CENTRALIZED ALLOWED WILDLIFE CONFIGURATION (THE ONLY AUTHORITATIVE LIST)
 # ==============================================================================
-ALLOWED_WILDLIFE: List[str] = [
+ALLOWED_WILDLIFE = [
     "elephant",
     "tiger",
     "leopard",
     "wild_boar",
+    "dog",
     "spotted_deer",
     "sloth_bear",
     "gaur",
@@ -48,7 +49,7 @@ ALLOWED_WILDLIFE: List[str] = [
     "cobra",
     "indian_python",
     "russells_viper",
-    "krait"
+    "krait",
 ]
 
 # Set representation for fast lookup
@@ -193,15 +194,51 @@ WILDLIFE_METADATA: Dict[str, Dict[str, Any]] = {
         "emoji": "🐍",
         "threat_level": "CRITICAL",
         "hazard_score": 95.0
+    },
+    "dog": {
+        "id": "dog",
+        "canonical": "Dog",
+        "scientific_name": "Canis lupus familiaris",
+        "aliases": ["dog", "domestic dog", "canis lupus familiaris", "canis_lupus_familiaris", "hound", "canine", "puppy", "indie", "pariah"],
+        "emoji": "🐕",
+        "threat_level": "ALERT",
+        "hazard_score": 45.0
     }
 }
 
-# Lookup map: normalized alias -> canonical key
+# Domestic animals (kept for reference)
+DOMESTIC_ANIMAL_METADATA: Dict[str, Dict[str, Any]] = {
+    "dog": {
+        "id": "dog",
+        "canonical": "Dog",
+        "scientific_name": "Canis lupus familiaris",
+        "aliases": ["dog", "domestic dog", "canis lupus familiaris", "canis_lupus_familiaris", "hound", "canine", "puppy", "indie", "pariah"],
+        "emoji": "🐕",
+        "threat_level": "ALERT",
+        "hazard_score": 45.0
+    }
+}
+
+# Lookup map: normalized alias -> canonical key (STRICTLY for ALLOWED_WILDLIFE_SET only)
 _NORMALIZED_ALIAS_LOOKUP: Dict[str, str] = {}
 for _key, _meta in WILDLIFE_METADATA.items():
+    if _key not in ALLOWED_WILDLIFE_SET:
+        continue
     for _alias in _meta["aliases"]:
         _norm = _alias.strip().lower().replace("_", "").replace("-", "").replace(" ", "").replace("'", "")
         _NORMALIZED_ALIAS_LOOKUP[_norm] = _key
+
+# Disallowed non-wildlife and domestic object keywords (must never map to wildlife)
+# NOTE: Dog is now an intentionally trained target class, so dog/puppy/canine are not disallowed.
+DISALLOWED_TERMS = {
+    "person", "human", "man", "woman", "people", "pedestrian", "child",
+    "cat", "kitten", "feline",
+    "cow", "cattle", "bull", "ox", "calf",
+    "horse", "sheep", "goat", "donkey", "pig",
+    "car", "automobile", "vehicle", "truck", "bus", "motorcycle", "bike", "bicycle",
+    "bird", "airplane", "boat", "train",
+    "lion", "cheetah"
+}
 
 
 # ==============================================================================
@@ -223,12 +260,15 @@ def match_allowed_wildlife(raw_name: str) -> Optional[str]:
     Returns the canonical allowed key (e.g. 'elephant', 'tiger', 'snake') if matched, else None.
     
     STRICT SECURITY RULES:
+    - Only matches against the 15 approved wildlife species.
     - Never maps unrelated animals (dog != wolf, cow != gaur, cat != leopard).
     - Never renames generic 'snake' to specific snake species (cobra, krait, python, viper).
-    - Rejects humans, vehicles, domestic livestock, pets, and non-target wildlife (e.g. 'Lion').
+    - Rejects humans, vehicles, domestic livestock, pets, and non-target wildlife (e.g. 'Lion', 'dog', 'person').
     """
     norm = normalize_class_name(raw_name)
     if not norm:
+        return None
+    if norm in DISALLOWED_TERMS:
         return None
     return _NORMALIZED_ALIAS_LOOKUP.get(norm, None)
 

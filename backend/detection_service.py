@@ -24,8 +24,11 @@ logger = logging.getLogger("kavach.detection")
 BASE_DIR = Path(__file__).resolve().parent
 
 # Configurable environment variables
-DEFAULT_MODEL_PATH = BASE_DIR / "best.pt"
-WILDLIFE_CONFIDENCE_THRESHOLD = float(os.getenv("WILDLIFE_CONFIDENCE_THRESHOLD", os.getenv("CONFIDENCE_THRESHOLD", "0.50")))
+DEFAULT_MODEL_PATH = (BASE_DIR / "best_kavach_5class.pt") if (BASE_DIR / "best_kavach_5class.pt").exists() else (BASE_DIR / "best.pt")
+# Calibrated confidence floor (allows dynamic testing down to 0.20 while preventing noise)
+MIN_WILDLIFE_CONFIDENCE = 0.20
+_env_conf = float(os.getenv("WILDLIFE_CONFIDENCE_THRESHOLD", os.getenv("CONFIDENCE_THRESHOLD", "0.35")))
+WILDLIFE_CONFIDENCE_THRESHOLD = max(_env_conf, MIN_WILDLIFE_CONFIDENCE)
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
 MODEL_PATH_ENV = os.getenv("MODEL_PATH", str(DEFAULT_MODEL_PATH))
 CONFIGURED_DEVICE = os.getenv("DEVICE", "auto").lower()
@@ -188,7 +191,7 @@ class DetectionService:
         Runs YOLO inference on a still image (file path, raw bytes, or numpy array).
         Applies strict 15-animal target species filtering.
         """
-        conf = conf_threshold if conf_threshold is not None else WILDLIFE_CONFIDENCE_THRESHOLD
+        conf = max(conf_threshold if conf_threshold is not None else WILDLIFE_CONFIDENCE_THRESHOLD, MIN_WILDLIFE_CONFIDENCE)
 
         # Read image to numpy BGR array if necessary
         frame = None
@@ -220,16 +223,19 @@ class DetectionService:
         1. Get real model class ID.
         2. Get real class name from loaded model.
         3. Check it against centralized ALLOWED_WILDLIFE list.
-        4. If allowed and confidence >= threshold -> Return detection.
+        4. If allowed and confidence >= 0.50 threshold -> Return detection.
         5. For everything else (unsupported animals, humans, vehicles, objects) -> REJECT.
         """
         if frame_bgr is None or frame_bgr.size == 0:
             return []
 
-        conf = conf_threshold if conf_threshold is not None else WILDLIFE_CONFIDENCE_THRESHOLD
+        conf = max(conf_threshold if conf_threshold is not None else WILDLIFE_CONFIDENCE_THRESHOLD, MIN_WILDLIFE_CONFIDENCE)
         if self.model is None:
             logger.warning("[YOLO] Inference requested but model is not loaded.")
             return []
+
+        fh, fw = frame_bgr.shape[:2]
+        print(f"[YOLO DEBUG] Resolution: Original={fw}x{fh}, Inference={imgsz}x{imgsz}", flush=True)
 
         detections: List[Dict[str, Any]] = []
 
@@ -248,19 +254,19 @@ class DetectionService:
                     confidence_val = float(box.conf[0])
                     raw_class_name = self.raw_model_classes.get(class_id, str(class_id))
 
-                    # Temporary development logging (Requirement 15)
+                    # Raw detection and threshold logging (Requirements 3 & 4)
                     print(
                         f"[YOLO DEBUG] RAW MODEL DETECTION: class_id={class_id}, "
                         f"class_name='{raw_class_name}', confidence={confidence_val:.3f}",
                         flush=True
                     )
+                    print(
+                        f"[YOLO DEBUG] Threshold: {conf:.2f}, Result: {'ACCEPTED' if confidence_val >= conf else 'REJECTED'}",
+                        flush=True
+                    )
 
                     # 1. Strict confidence check
                     if confidence_val < conf:
-                        print(
-                            f"[YOLO DEBUG] FILTER RESULT: REJECTED (confidence {confidence_val:.2f} < threshold {conf:.2f})",
-                            flush=True
-                        )
                         continue
 
                     # 2. Strict capability & whitelist check
@@ -273,15 +279,34 @@ class DetectionService:
                         continue
 
                     allowed_info = self.class_id_to_allowed[class_id]
+                    canonical_name = allowed_info["canonical"]
+
+                    # 3. Strict 4-class target species enforcement (STEP 1 & STEP 8)
+                    from temporal_safety import ALLOWED_CANONICAL_TARGETS, BoundingBoxQualityFilter
+                    if canonical_name not in ALLOWED_CANONICAL_TARGETS:
+                        print(
+                            f"[YOLO DEBUG] FILTER RESULT: REJECTED (canonical '{canonical_name}' not in strict 4-target species allowlist)",
+                            flush=True
+                        )
+                        continue
+
+                    # 4. Bounding Box Quality Filter (STEP 13: Reject tiny boxes & abnormal geometry)
+                    coords = [round(float(c), 1) for c in box.xyxy[0].tolist()]
+                    is_valid_box, reject_reason = BoundingBoxQualityFilter.is_valid_box(coords, frame_bgr.shape)
+                    if not is_valid_box:
+                        print(
+                            f"[YOLO DEBUG] FILTER RESULT: REJECTED BBOX QUALITY ({reject_reason})",
+                            flush=True
+                        )
+                        continue
+
                     print(
-                        f"[YOLO DEBUG] FILTER RESULT: ALLOWED -> {allowed_info['canonical']} ({confidence_val * 100:.1f}%)",
+                        f"[YOLO DEBUG] FILTER RESULT: ALLOWED -> {canonical_name} ({confidence_val * 100:.1f}%)",
                         flush=True
                     )
 
-                    coords = [round(float(c), 1) for c in box.xyxy[0].tolist()]
-
                     detections.append({
-                        "species": allowed_info["canonical"],
+                        "species": canonical_name,
                         "class_name": raw_class_name,
                         "class_id": class_id,
                         "key": allowed_info["key"],

@@ -108,6 +108,10 @@ def init_db():
     add_column_if_missing(cursor, "detections", "village_name TEXT")
     add_column_if_missing(cursor, "detections", "incident_code TEXT")
     add_column_if_missing(cursor, "detections", "verification_status TEXT DEFAULT 'AI_DETECTED'")
+    add_column_if_missing(cursor, "detections", "movement_status TEXT DEFAULT 'UNKNOWN'")
+    add_column_if_missing(cursor, "detections", "direction TEXT DEFAULT 'UNKNOWN'")
+    add_column_if_missing(cursor, "detections", "incident_id TEXT")
+    add_column_if_missing(cursor, "detections", "frame_id INTEGER")
 
     # 4. INCIDENTS (Consolidated Operational Cases & Lifecycle)
     cursor.execute("""
@@ -155,6 +159,8 @@ def init_db():
     add_column_if_missing(cursor, "incidents", "guard_notes TEXT")
     add_column_if_missing(cursor, "incidents", "guard_photo_path TEXT")
     add_column_if_missing(cursor, "incidents", "resolution TEXT")
+    add_column_if_missing(cursor, "incidents", "source TEXT DEFAULT 'CITIZEN_REPORT'")
+    add_column_if_missing(cursor, "incidents", "severity TEXT DEFAULT 'MEDIUM'")
 
     # 5. ALERTS (Community & Ranger Notifications)
     cursor.execute("""
@@ -212,6 +218,7 @@ def init_db():
         verified_by TEXT
     )
     """)
+    add_column_if_missing(cursor, "wildlife_reports", "created_at TEXT")
 
     # 7. GEOFENCES (Zones & Buffers)
     cursor.execute("""

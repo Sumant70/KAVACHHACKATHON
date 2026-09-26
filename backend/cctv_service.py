@@ -15,6 +15,7 @@ from db import get_db_connection
 from risk_engine import calculate_wildlife_risk
 from geofence_engine import check_geofences
 from detection_service import get_detection_service
+from temporal_safety import get_stream_tracker, global_alert_deduplicator
 
 logger = logging.getLogger("kavach.cctv")
 
@@ -355,16 +356,43 @@ def _run_cctv_worker(camera_id: str, rtsp_url: str, stop_event: threading.Event)
                         break
                     continue
 
-                _CAMERA_STATUS[camera_id] = "RECONNECTING" if retry_count > 0 else "CONNECTING"
-                logger.info("[CCTV] %s stream for %s (attempt %d/5)...", _CAMERA_STATUS[camera_id], camera_id, retry_count + 1)
+                # Fast pre-check for network or demo streams to prevent OpenCV GIL blocking
+                if isinstance(source, str) and source.startswith(("rtsp://", "http://", "https://")):
+                    import socket
+                    from urllib.parse import urlparse
+                    try:
+                        p = urlparse(source)
+                        h = p.hostname
+                        pt = p.port or 554
+                        if h:
+                            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            s.settimeout(0.6)
+                            s.connect((h, pt))
+                            s.close()
+                    except Exception as probe_err:
+                        retry_count += 1
+                        _CAMERA_STATUS[camera_id] = "OFFLINE"
+                        logger.info("[CCTV] Fast probe: %s unreachable at %s (%s). Marked OFFLINE.", camera_id, source[:30], probe_err)
+                        if stop_event.wait(timeout=30.0):
+                            break
+                        continue
+                elif isinstance(source, str) and source.startswith("demo://"):
+                    demo_file = Path("sample_videos") / source.replace("demo://", "")
+                    if not demo_file.exists():
+                        _CAMERA_STATUS[camera_id] = "OFFLINE"
+                        logger.info("[CCTV] Demo file not found for %s (%s). Marked OFFLINE.", camera_id, source)
+                        if stop_event.wait(timeout=60.0):
+                            break
+                        continue
+                    source = str(demo_file)
 
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;3000000"
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;2000000"
                 cap = cv2.VideoCapture(source)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
                 if not cap.isOpened():
                     retry_count += 1
-                    _CAMERA_STATUS[camera_id] = "OFFLINE" if retry_count >= 5 else "RECONNECTING"
+                    _CAMERA_STATUS[camera_id] = "OFFLINE" if retry_count >= 3 else "RECONNECTING"
                     logger.warning("[CCTV] Stream connection failed for %s. Backoff %ss.", camera_id, backoff_sec)
                     if stop_event.wait(timeout=backoff_sec):
                         break
@@ -445,8 +473,17 @@ def _run_cctv_worker(camera_id: str, rtsp_url: str, stop_event: threading.Event)
                 } if detected_species else None
             }
 
-            # 6. Trigger Incident & DB record if confirmed detection
-            if detected_species and best_conf >= cam_conf_thresh:
+            # 6. Multi-frame confirmation & deduplication safety check (STEP 8 & STEP 15)
+            stream_tracker = get_stream_tracker(f"cctv_{camera_id}", required_consecutive=3, conf_floor=cam_conf_thresh)
+            safety_eval = stream_tracker.update(detected_species, best_conf)
+
+            # Trigger Incident & DB record ONLY if confirmed detection across consecutive frames
+            if safety_eval["is_confirmed"] and detected_species and best_conf >= cam_conf_thresh:
+                # Check alert cooldown / deduplication
+                should_alert, elapsed_alert = global_alert_deduplicator.should_dispatch_alert(detected_species, cam_village_id)
+                if not should_alert:
+                    logger.debug("[CCTV] Alert suppressed by cooldown (%.1fs elapsed). Telemetry will continue updating.", elapsed_alert)
+
                 snapshot_filename = f"cctv_{camera_id}_{int(time.time())}.jpg"
                 snapshot_path = UPLOADS_DIR / snapshot_filename
                 cv2.imwrite(str(snapshot_path), frame)
@@ -481,8 +518,8 @@ def _run_cctv_worker(camera_id: str, rtsp_url: str, stop_event: threading.Event)
                     c_conn = get_db_connection()
                     c_cur = c_conn.cursor()
                     c_cur.execute("""
-                        INSERT INTO detections (id, timestamp, species, class_name, confidence, bbox_json, count, lat, lng, accuracy, risk_score, risk_level, image_path, device_id, zone_id, status, source, camera_id, camera_name, village_id, village_name, incident_code, verification_status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CCTV', ?, ?, ?, ?, ?, 'AI_DETECTED')
+                        INSERT INTO detections (id, timestamp, species, class_name, confidence, bbox_json, count, lat, lng, accuracy, risk_score, risk_level, image_path, device_id, zone_id, status, source, camera_id, camera_name, village_id, village_name, incident_code, incident_id, verification_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CCTV', ?, ?, ?, ?, ?, ?, 'AI_DETECTED')
                     """, (
                         f"DET-{uuid.uuid4().hex[:6].upper()}",
                         datetime.now().strftime("Today, %H:%M"),
@@ -504,7 +541,8 @@ def _run_cctv_worker(camera_id: str, rtsp_url: str, stop_event: threading.Event)
                         cam_name,
                         cam_village_id,
                         cam_village_name,
-                        f"KVC-{inc_id[-4:]}"
+                        f"KVC-{inc_id[-4:]}",
+                        inc_id
                     ))
                     c_cur.execute("""
                         UPDATE cameras
